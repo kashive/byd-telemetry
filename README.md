@@ -44,7 +44,7 @@ flowchart LR
 
 ### 1. Clone & Configure
 ```bash
-git clone https://github.com/your-username/byd-telemetry.git
+git clone https://github.com/kashive/byd-telemetry.git
 cd byd-telemetry
 
 # Copy example environment configuration
