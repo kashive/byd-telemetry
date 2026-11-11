@@ -1,0 +1,14 @@
+FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
+
+WORKDIR /tests
+
+RUN pip install --no-cache-dir \
+    pytest==8.3.3 \
+    pytest-playwright==0.6.2 \
+    httpx==0.27.2 \
+    paho-mqtt==2.1.0
+
+COPY tests/ /tests/
+
+ENV PYTHONPATH=/tests
+CMD ["pytest", "-v", "-s", "/tests/test_e2e_pipeline.py", "/tests/test_ui_e2e.py"]

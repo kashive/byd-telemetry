@@ -1,0 +1,7 @@
+# Example Mosquitto password file.
+# Format: <username>:<hashed_password>
+# To generate a new password file for Mosquitto, run:
+#   docker run --rm -v $(pwd)/mosquitto/config:/mosquitto/config eclipse-mosquitto:2 mosquitto_passwd -c -b /mosquitto/config/pwfile <username> <password>
+#
+# Default development example (user: byd, pass: change-this-secure-password):
+byd:$7$1000$yBqG2oN2sB8+3K9z$vM5Y5oA8L6z7K0v1P2q3r4s5t6u7v8w9x0y1z2a3b4c5d6e7f8g9h0i1j2k3l4m5n6o7p8q9r0s1t2u3v4w5x6==

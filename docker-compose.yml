@@ -1,0 +1,58 @@
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    command: --no-setup-token
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: byd-mosquitto
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+      - "${MQTT_WS_PORT:-9001}:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+
+  byd-telemetry:
+    build: ./byd-telemetry
+    container_name: byd-telemetry
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      - mosquitto
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_USER=${MQTT_USER:-byd}
+      - MQTT_PASS=${MQTT_PASS:-byd-atto3-ktm-2026}
+      - DB_PATH=/data/telemetry.db
+      - DEFAULT_NTFY_TOPIC=${DEFAULT_NTFY_TOPIC:-byd-telemetry-alerts}
+    volumes:
+      - ./byd-data:/data
+      - ./byd-telemetry/app.py:/app/app.py
+      - ./byd-telemetry/static:/app/static
+      - ./byd-telemetry/tests:/app/tests
+
+volumes:
+  portainer_data:

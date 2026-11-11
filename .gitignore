@@ -1,0 +1,26 @@
+# Local SQLite database & runtime data
+byd-data/*
+!byd-data/.gitkeep
+
+# Mosquitto runtime data & logs
+mosquitto/data/*
+!mosquitto/data/.gitkeep
+mosquitto/log/*
+!mosquitto/log/.gitkeep
+mosquitto/config/pwfile
+
+# Secrets & Environment configs
+.env
+*.local
+
+# Binaries & Third-party APKs
+car-apks/platform-tools/
+*.apk
+
+# Python & System cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.bak*
+.DS_Store
+Thumbs.db

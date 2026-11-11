@@ -1,0 +1,1779 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#070b14" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>BYD Atto 3 — Telemetry, Mileage & Trip Server</title>
+
+  <!-- Self-Hosted Tailwind CSS + App Styles (Zero External CDN Dependencies) -->
+  <link rel="stylesheet" href="/static/vendor/tailwind-compiled.css?v=2" />
+
+  <!-- Self-Hosted Leaflet Maps -->
+  <link rel="stylesheet" href="/static/vendor/leaflet.css?v=2" />
+  <script src="/static/vendor/leaflet.js?v=2"></script>
+
+  <!-- Self-Hosted Chart.js -->
+  <script src="/static/vendor/chart.umd.min.js?v=2"></script>
+
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    body {
+      background-color: #070b14;
+      background-image: radial-gradient(circle at 50% 0%, rgba(14, 165, 233, 0.08) 0%, transparent 55%);
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: none;
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(11, 17, 32, 0.96) 100%);
+      border: 1px solid rgba(51, 65, 85, 0.55);
+      border-radius: 1rem;
+      box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.4);
+    }
+    .hero-card {
+      background: linear-gradient(135deg, rgba(14, 28, 54, 0.95) 0%, rgba(11, 18, 35, 0.98) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 1.125rem;
+      box-shadow: 0 12px 32px -6px rgba(2, 132, 199, 0.18);
+    }
+    .leaflet-container {
+      background: #0b1120;
+      border-radius: 0.875rem;
+      font-family: inherit;
+      z-index: 10 !important;
+    }
+    #notif-modal {
+      z-index: 9999 !important;
+    }
+    #toast-banner {
+      z-index: 9998 !important;
+    }
+    .tab-btn.active {
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      color: #ffffff;
+      box-shadow: 0 2px 10px rgba(2, 132, 199, 0.35);
+    }
+    .mobile-nav-btn.active {
+      color: #38bdf8;
+    }
+    .mobile-nav-btn.active .nav-indicator {
+      opacity: 1;
+      transform: scaleX(1);
+    }
+    .car-marker-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .pulse-ring {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border-radius: 9999px;
+      background: rgba(14, 165, 233, 0.35);
+      animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+    }
+    /* Live "you are here" beacon: staggered radar rings + glowing core */
+    .live-beacon {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 34px;
+      height: 34px;
+      margin: -17px 0 0 -17px;
+      border-radius: 9999px;
+      background: rgba(16, 185, 129, 0.45);
+      border: 2px solid rgba(52, 211, 153, 0.9);
+      animation: live-radar 1.8s cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
+      pointer-events: none;
+    }
+    .live-beacon.delay { animation-delay: 0.9s; }
+    .car-core {
+      position: relative;
+      z-index: 1;
+      width: 32px;
+      height: 32px;
+      border-radius: 9999px;
+      background: #0284c7;
+      border: 2px solid #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+    }
+    .car-core.live {
+      background: #059669;
+      animation: live-glow 1.8s ease-in-out infinite;
+    }
+    .live-dot-core {
+      position: relative;
+      z-index: 1;
+      width: 18px;
+      height: 18px;
+      border-radius: 9999px;
+      background: #10b981;
+      border: 3px solid #ffffff;
+      animation: live-glow 1.8s ease-in-out infinite;
+    }
+    @keyframes live-radar {
+      0% { transform: scale(0.6); opacity: 0.95; }
+      100% { transform: scale(2.8); opacity: 0; }
+    }
+    @keyframes live-glow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7), 0 4px 12px rgba(0, 0, 0, 0.6); }
+      50% { box-shadow: 0 0 14px 4px rgba(16, 185, 129, 0.85), 0 4px 12px rgba(0, 0, 0, 0.6); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .live-beacon, .car-core.live, .live-dot-core { animation: none; }
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    @keyframes ping {
+      75%, 100% {
+        transform: scale(1.9);
+        opacity: 0;
+      }
+    }
+    /* Compact Leaflet controls on mobile */
+    @media (max-width: 640px) {
+      .leaflet-control-zoom a {
+        width: 28px !important;
+        height: 28px !important;
+        line-height: 28px !important;
+        font-size: 15px !important;
+      }
+      .leaflet-control-layers-toggle {
+        width: 32px !important;
+        height: 32px !important;
+        background-size: 18px 18px !important;
+      }
+      .leaflet-control-attribution {
+        font-size: 9px !important;
+        background: rgba(15, 23, 42, 0.7) !important;
+        color: #94a3b8 !important;
+      }
+      .leaflet-control-attribution a {
+        color: #38bdf8 !important;
+      }
+    }
+    /* Trip detail: overlay shown when a trip has no GPS samples */
+    .detail-map-wrap { position: relative; }
+    .detail-map-empty {
+      position: absolute; inset: 0; z-index: 500;
+      display: flex; align-items: center; justify-content: center;
+      padding: 16px; pointer-events: none;
+      background: rgba(2, 6, 23, 0.55);
+    }
+    .detail-map-empty[hidden] { display: none; }
+    .detail-map-empty-box {
+      max-width: 340px; text-align: center; pointer-events: auto;
+      background: rgba(15, 23, 42, 0.92); border: 1px solid #334155;
+      border-radius: 12px; padding: 12px 14px;
+    }
+    .detail-map-empty-title { color: #e2e8f0; font-weight: 600; font-size: 13px; }
+    .detail-map-empty-body { color: #94a3b8; font-size: 11px; margin-top: 4px; line-height: 1.45; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col pb-20 md:pb-6">
+
+  <!-- Sleek Responsive Top Bar -->
+  <header class="border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-xl sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-3.5 sm:px-5 py-2.5 flex items-center justify-between gap-2">
+      <!-- Brand & Compact Status -->
+      <div class="flex items-center gap-2.5 min-w-0 flex-1">
+        <div class="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl bg-gradient-to-br from-sky-500/25 to-blue-600/15 border border-sky-400/40 flex items-center justify-center text-sky-400 font-extrabold text-sm sm:text-base tracking-wider shadow-inner">
+          BYD
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+            <h1 class="font-bold text-sm sm:text-lg text-white tracking-tight truncate">BYD Atto 3</h1>
+            <span id="conn-badge" class="px-2 py-0.5 text-[10px] sm:text-xs font-semibold rounded-full bg-slate-800 text-slate-300 border border-slate-700 whitespace-nowrap">
+              Connecting...
+            </span>
+            <span id="car-state-badge" class="px-2 py-0.5 text-[10px] sm:text-xs font-semibold rounded-full bg-slate-800 text-slate-400 border border-slate-700 whitespace-nowrap">
+              Parked
+            </span>
+          </div>
+          <p class="text-[11px] sm:text-xs text-slate-400 truncate mt-0.5 tabular-nums">
+            <span id="header-odo" class="text-sky-400 font-semibold">Odometer: — km</span>
+            <span class="mx-1 text-slate-600">•</span>
+            <span id="last-seen">Waiting for telemetry...</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Desktop Navigation Tabs + Notification Bell -->
+      <div class="flex items-center gap-2 shrink-0">
+        <nav class="hidden md:flex items-center gap-1.5 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+          <button id="tab-btn-live" onclick="switchTab('live')" class="tab-btn active px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium text-slate-300 transition">
+            Live Map & Status
+          </button>
+          <button id="tab-btn-mileage" onclick="switchTab('mileage')" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium text-slate-300 transition">
+            Mileage & Efficiency
+          </button>
+          <button id="tab-btn-trips" onclick="switchTab('trips')" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium text-slate-300 transition">
+            Trip History
+          </button>
+        </nav>
+
+        <button id="notif-bell-btn" onclick="openNotifModal()" title="Trip Start & Push Notifications" class="relative w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/80 flex items-center justify-center text-slate-200 transition">
+          <svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+          </svg>
+          <span id="notif-dot" class="hidden absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-950"></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Live Toast Alert Banner -->
+  <div id="toast-banner" class="hidden fixed top-16 inset-x-3 sm:left-auto sm:right-5 sm:w-96 z-50 card p-3.5 border-emerald-500/60 bg-slate-900/95 shadow-2xl">
+    <div class="flex items-start justify-between gap-2.5">
+      <div class="flex items-start gap-2.5 min-w-0">
+        <span class="w-2.5 h-2.5 mt-1.5 shrink-0 rounded-full bg-emerald-400 animate-ping"></span>
+        <div class="min-w-0">
+          <div id="toast-title" class="text-xs sm:text-sm font-bold text-white">BYD Atto 3 — Trip Started</div>
+          <div id="toast-body" class="text-[11px] sm:text-xs text-slate-300 mt-0.5 leading-relaxed">—</div>
+        </div>
+      </div>
+      <button onclick="document.getElementById('toast-banner').classList.add('hidden')" class="text-slate-400 hover:text-white text-sm px-1">✕</button>
+    </div>
+  </div>
+
+  <!-- Main Content Container -->
+  <main class="max-w-7xl w-full mx-auto px-3 sm:px-5 py-3 sm:py-5 flex-1 space-y-3.5 sm:space-y-5">
+
+    <!-- Active Trip Banner (Shown automatically when a drive is in progress) -->
+    <div id="active-trip-banner" class="hidden card p-3 sm:p-3.5 border-sky-500/50 bg-sky-950/30 flex items-center justify-between gap-2.5">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <span class="w-2.5 h-2.5 shrink-0 rounded-full bg-emerald-400 animate-pulse"></span>
+        <div class="min-w-0">
+          <div class="text-xs sm:text-sm font-bold text-white truncate">
+            Live Drive (<span id="banner-trip-id">Trip #—</span>)
+          </div>
+          <div class="text-[11px] sm:text-xs text-slate-300 truncate tabular-nums">
+            <span id="banner-dist" class="font-semibold text-sky-300">0.0 km</span> •
+            <span id="banner-dur" class="font-semibold text-sky-300">0m</span> •
+            <span id="banner-kwh" class="font-semibold text-emerald-300">0.00 kWh</span> •
+            <span id="banner-eff" class="font-semibold text-amber-300">— Wh/km</span>
+          </div>
+        </div>
+      </div>
+      <button id="banner-view-btn" class="shrink-0 px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-xs font-semibold text-white transition">
+        View →
+      </button>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 1: LIVE KATHMANDU MAP & TELEMETRY      -->
+    <!-- ========================================== -->
+    <section id="view-live" class="space-y-3.5 sm:space-y-5">
+
+      <!-- Responsive Telemetry Grid: Hero Dual-Card on Mobile + 6 Columns on Desktop -->
+      <div class="space-y-2.5 lg:space-y-0 lg:grid lg:grid-cols-6 lg:gap-3.5">
+
+        <!-- Primary EV Hero Row (Battery SoC, Est Range, Speed & Gear) -->
+        <div class="hero-card p-3.5 sm:p-4 lg:col-span-3">
+          <div class="grid grid-cols-3 gap-2 sm:gap-4 items-center">
+            <!-- Battery SoC -->
+            <div>
+              <div class="flex items-center gap-1.5 text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <span>BATTERY</span>
+                <span id="live-soh" class="text-[10px] text-emerald-400 font-semibold">SoH 100%</span>
+              </div>
+              <div class="flex items-baseline gap-0.5 mt-0.5 tabular-nums">
+                <span id="live-soc" class="text-2xl sm:text-3xl font-extrabold text-emerald-400">—</span>
+                <span class="text-xs text-emerald-400/80 font-bold">%</span>
+              </div>
+              <div class="w-full bg-slate-800/90 h-1.5 rounded-full mt-1.5 overflow-hidden">
+                <div id="live-soc-bar" class="bg-gradient-to-r from-emerald-500 to-teal-300 h-full rounded-full transition-all duration-300" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <!-- Est. Range -->
+            <div class="border-l border-slate-800/80 pl-2.5 sm:pl-4">
+              <div class="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400">EST. RANGE</div>
+              <div class="flex items-baseline gap-1 mt-0.5 tabular-nums">
+                <span id="live-range" class="text-2xl sm:text-3xl font-extrabold text-sky-400">—</span>
+                <span class="text-xs text-slate-400 font-medium">km</span>
+              </div>
+              <div id="live-remain-kwh" class="text-[10px] sm:text-[11px] text-slate-400 mt-1 truncate tabular-nums">Rem: — kWh</div>
+            </div>
+
+            <!-- Speed & Gear -->
+            <div class="border-l border-slate-800/80 pl-2.5 sm:pl-4">
+              <div class="flex items-center justify-between text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <span>SPEED</span>
+                <span id="live-gear" class="px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 font-extrabold text-[11px] border border-sky-500/40">P</span>
+              </div>
+              <div class="flex items-baseline gap-1 mt-0.5 tabular-nums">
+                <span id="live-speed" class="text-2xl sm:text-3xl font-extrabold text-white">0.0</span>
+                <span class="text-[11px] text-slate-400">km/h</span>
+              </div>
+              <div id="live-modes" class="text-[10px] sm:text-[11px] text-slate-400 mt-1 truncate">Eco • Auto</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Secondary Strip: 3 Compact Cards side-by-side on Mobile & Desktop -->
+        <div class="grid grid-cols-3 gap-2.5 sm:gap-3.5 lg:col-span-3">
+          <!-- Motor Power -->
+          <div class="card p-2.5 sm:p-4 flex flex-col justify-between">
+            <div class="flex items-center justify-between gap-1 text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <span class="truncate">POWER</span>
+              <span id="live-power-tag" class="text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">IDLE</span>
+            </div>
+            <div class="flex items-baseline gap-1 my-0.5 tabular-nums">
+              <span id="live-power" class="text-lg sm:text-2xl lg:text-3xl font-extrabold text-white">0.0</span>
+              <span class="text-[10px] sm:text-xs text-slate-400">kW</span>
+            </div>
+            <div id="live-hv-stats" class="text-[10px] sm:text-[11px] text-slate-400 truncate tabular-nums">343 V • 0.0 A</div>
+          </div>
+
+          <!-- Odometer -->
+          <div class="card p-2.5 sm:p-4 flex flex-col justify-between">
+            <div class="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400 truncate">ODOMETER</div>
+            <div class="flex items-baseline gap-1 my-0.5 tabular-nums">
+              <span id="live-odo" class="text-lg sm:text-2xl lg:text-3xl font-extrabold text-amber-300 truncate">—</span>
+              <span class="text-[10px] sm:text-xs text-slate-400">km</span>
+            </div>
+            <div id="live-today-km" class="text-[10px] sm:text-[11px] text-slate-300 truncate tabular-nums">Today: 0.0 km</div>
+          </div>
+
+          <!-- 12V Aux & Temp -->
+          <div class="card p-2.5 sm:p-4 flex flex-col justify-between">
+            <div class="flex items-center justify-between gap-1 text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <span>12V AUX</span>
+              <span id="live-lock-tag" class="text-[10px] text-emerald-400 font-semibold whitespace-nowrap">🔒</span>
+            </div>
+            <div class="flex items-baseline gap-1 my-0.5 tabular-nums">
+              <span id="live-12v" class="text-lg sm:text-2xl lg:text-3xl font-extrabold text-indigo-300">—</span>
+              <span class="text-[10px] sm:text-xs text-slate-400">V</span>
+            </div>
+            <div id="live-temps" class="text-[10px] sm:text-[11px] text-slate-400 truncate tabular-nums">Locked • 15°C</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Map + Detailed Telemetry Side Panel -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-3.5 sm:gap-4">
+        <!-- Kathmandu Interactive Live Map -->
+        <div class="card p-2.5 sm:p-3.5 lg:col-span-2 flex flex-col">
+          <div class="flex items-center justify-between gap-2 mb-2 px-0.5">
+            <div class="min-w-0">
+              <h2 class="text-xs sm:text-sm font-bold text-white truncate">Kathmandu Valley GPS</h2>
+              <p id="live-coords-text" class="text-[11px] text-slate-400 truncate tabular-nums">27.7172° N, 85.3240° E</p>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <label class="flex items-center gap-1.5 text-[11px] sm:text-xs text-slate-200 cursor-pointer bg-slate-900/90 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border border-slate-700/80 select-none">
+                <input type="checkbox" id="follow-car-toggle" checked class="accent-sky-500 w-3.5 h-3.5" />
+                <span>Follow</span>
+              </label>
+              <button onclick="centerKathmandu()" class="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-[11px] sm:text-xs text-slate-200 border border-slate-700/80 transition whitespace-nowrap">
+                Center
+              </button>
+            </div>
+          </div>
+          <div id="live-map" class="w-full h-[290px] sm:h-[460px]"></div>
+        </div>
+
+        <!-- Right Side: Tire Pressures, Blade Battery & Recent Drives -->
+        <div class="space-y-3.5 sm:space-y-4">
+          <!-- 4-Wheel Tire Pressure & Temperature Card -->
+          <div class="card p-3.5 sm:p-4">
+            <div class="flex items-center justify-between mb-2.5">
+              <h3 class="text-xs sm:text-sm font-bold text-white">Tyre Pressure & Temp</h3>
+              <span class="text-[10px] sm:text-[11px] text-slate-400">Target ~35 PSI</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2.5 tabular-nums">
+              <div class="p-2.5 sm:p-3 rounded-xl bg-slate-900/80 border border-slate-800/90 flex items-center justify-between">
+                <div>
+                  <div class="text-[10px] font-semibold uppercase text-slate-400">Front Left</div>
+                  <div class="text-lg sm:text-xl font-extrabold text-sky-300 mt-0.5"><span id="tire-lf-psi">—</span> <span class="text-[10px] font-normal text-slate-400">PSI</span></div>
+                </div>
+                <div class="text-right">
+                  <span class="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] text-slate-300"><span id="tire-lf-c">—</span>°C</span>
+                </div>
+              </div>
+              <div class="p-2.5 sm:p-3 rounded-xl bg-slate-900/80 border border-slate-800/90 flex items-center justify-between">
+                <div>
+                  <div class="text-[10px] font-semibold uppercase text-slate-400">Front Right</div>
+                  <div class="text-lg sm:text-xl font-extrabold text-sky-300 mt-0.5"><span id="tire-rf-psi">—</span> <span class="text-[10px] font-normal text-slate-400">PSI</span></div>
+                </div>
+                <div class="text-right">
+                  <span class="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] text-slate-300"><span id="tire-rf-c">—</span>°C</span>
+                </div>
+              </div>
+              <div class="p-2.5 sm:p-3 rounded-xl bg-slate-900/80 border border-slate-800/90 flex items-center justify-between">
+                <div>
+                  <div class="text-[10px] font-semibold uppercase text-slate-400">Rear Left</div>
+                  <div class="text-lg sm:text-xl font-extrabold text-sky-300 mt-0.5"><span id="tire-lr-psi">—</span> <span class="text-[10px] font-normal text-slate-400">PSI</span></div>
+                </div>
+                <div class="text-right">
+                  <span class="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] text-slate-300"><span id="tire-lr-c">—</span>°C</span>
+                </div>
+              </div>
+              <div class="p-2.5 sm:p-3 rounded-xl bg-slate-900/80 border border-slate-800/90 flex items-center justify-between">
+                <div>
+                  <div class="text-[10px] font-semibold uppercase text-slate-400">Rear Right</div>
+                  <div class="text-lg sm:text-xl font-extrabold text-sky-300 mt-0.5"><span id="tire-rr-psi">—</span> <span class="text-[10px] font-normal text-slate-400">PSI</span></div>
+                </div>
+                <div class="text-right">
+                  <span class="px-1.5 py-0.5 rounded bg-slate-800 text-[11px] text-slate-300"><span id="tire-rr-c">—</span>°C</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Blade Battery Cell & Thermal Diagnostics -->
+          <div class="card p-3.5 sm:p-4 space-y-2.5">
+            <h3 class="text-xs sm:text-sm font-bold text-white">Blade Battery (LFP) Diagnostics</h3>
+            <div class="grid grid-cols-2 gap-2 text-xs tabular-nums">
+              <div class="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/90">
+                <div class="text-[11px] text-slate-400">Cell Min / Max</div>
+                <div id="cell-min-max" class="font-bold text-white mt-0.5">— / — V</div>
+              </div>
+              <div class="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/90">
+                <div class="text-[11px] text-slate-400">Cell Spread (ΔV)</div>
+                <div id="cell-delta-mv" class="font-bold text-emerald-400 mt-0.5">— mV</div>
+              </div>
+              <div class="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/90">
+                <div class="text-[11px] text-slate-400">Lifetime Discharge</div>
+                <div id="total-discharge" class="font-bold text-white mt-0.5">— kWh</div>
+              </div>
+              <div class="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/90">
+                <div class="text-[11px] text-slate-400">Ambient / Cabin</div>
+                <div id="cabin-ext-temp" class="font-bold text-white mt-0.5">—°C</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Recent Trips Preview -->
+          <div class="card p-3.5 sm:p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-xs sm:text-sm font-bold text-white">Recent Drives</h3>
+              <button onclick="switchTab('trips')" class="text-xs font-medium text-sky-400 hover:underline">View All →</button>
+            </div>
+            <div id="recent-trips-mini" class="space-y-2 text-xs">
+              <div class="text-slate-500 py-3 text-center">No trips recorded yet.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- TAB 2: MILEAGE & EFFICIENCY DASHBOARD      -->
+    <!-- ========================================== -->
+    <section id="view-mileage" class="hidden space-y-3.5 sm:space-y-5">
+      <!-- Mileage Summary Cards (2x3 on Mobile, 6-col on Desktop) -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5 tabular-nums">
+        <div class="card p-3 sm:p-4 border-amber-500/30">
+          <div class="text-[10px] sm:text-xs font-semibold text-slate-400">ODOMETER</div>
+          <div class="text-xl sm:text-2xl lg:text-3xl font-extrabold text-amber-300 mt-1 truncate"><span id="mil-odo">—</span> <span class="text-xs font-normal text-slate-400">km</span></div>
+          <div class="text-[10px] sm:text-[11px] text-slate-400 mt-1">Total car mileage</div>
+        </div>
+
+        <div class="card p-3 sm:p-4">
+          <div class="text-[10px] sm:text-xs font-semibold text-slate-400">TODAY'S MILEAGE</div>
+          <div class="text-xl sm:text-2xl lg:text-3xl font-extrabold text-white mt-1"><span id="mil-today-km">0.0</span> <span class="text-xs font-normal text-slate-400">km</span></div>
+          <div id="mil-today-sub" class="text-[10px] sm:text-[11px] text-slate-400 mt-1 truncate">0 trips • 0.0 kWh</div>
+        </div>
+
+        <div class="card p-3 sm:p-4">
+          <div class="text-[10px] sm:text-xs font-semibold text-slate-400">LAST 7 DAYS</div>
+          <div class="text-xl sm:text-2xl lg:text-3xl font-extrabold text-sky-300 mt-1"><span id="mil-week-km">0.0</span> <span class="text-xs font-normal text-slate-400">km</span></div>
+          <div id="mil-week-sub" class="text-[10px] sm:text-[11px] text-slate-400 mt-1 truncate">0 trips • 0.0 kWh</div>
+        </div>
+
+        <div class="card p-3 sm:p-4">
+          <div class="text-[10px] sm:text-xs font-semibold text-slate-400">THIS MONTH</div>
+          <div class="text-xl sm:text-2xl lg:text-3xl font-extrabold text-indigo-300 mt-1"><span id="mil-month-km">0.0</span> <span class="text-xs font-normal text-slate-400">km</span></div>
+          <div id="mil-month-sub" class="text-[10px] sm:text-[11px] text-slate-400 mt-1 truncate">0 trips • 0.0 kWh</div>
+        </div>
+
+        <div class="card p-3 sm:p-4">
+          <div class="text-[10px] sm:text-xs font-semibold text-slate-400">AVG EFFICIENCY</div>
+          <div class="text-xl sm:text-2xl lg:text-3xl font-extrabold text-emerald-400 mt-1"><span id="mil-wh-km">—</span> <span class="text-xs font-normal text-slate-400">Wh/km</span></div>
+          <div id="mil-km-kwh" class="text-[10px] sm:text-[11px] text-emerald-300 mt-1 truncate">Efficiency: — km/kWh</div>
+        </div>
+
+        <div class="card p-3 sm:p-4">
+          <div class="text-[10px] sm:text-xs font-semibold text-slate-400">TRACKED ENERGY</div>
+          <div class="text-xl sm:text-2xl lg:text-3xl font-extrabold text-white mt-1"><span id="mil-total-kwh">0.0</span> <span class="text-xs font-normal text-slate-400">kWh</span></div>
+          <div id="mil-regen-sub" class="text-[10px] sm:text-[11px] text-emerald-400 mt-1 truncate">Regen: +0.0 kWh</div>
+        </div>
+      </div>
+
+      <!-- Daily Mileage & Efficiency Charts -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4">
+        <div class="card p-3.5 sm:p-4">
+          <div class="mb-2.5">
+            <h3 class="text-xs sm:text-sm font-bold text-white">Daily Mileage Driven (km / day)</h3>
+            <p class="text-[11px] text-slate-400">Last 30 days in Kathmandu (NPT)</p>
+          </div>
+          <div class="h-52 sm:h-64">
+            <canvas id="chart-daily-km"></canvas>
+          </div>
+        </div>
+
+        <div class="card p-3.5 sm:p-4">
+          <div class="mb-2.5">
+            <h3 class="text-xs sm:text-sm font-bold text-white">Daily Energy Efficiency (Wh/km)</h3>
+            <p class="text-[11px] text-slate-400">Lower Wh/km = higher range efficiency</p>
+          </div>
+          <div class="h-52 sm:h-64">
+            <canvas id="chart-daily-eff"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charging History -->
+      <div class="card p-3.5 sm:p-4">
+        <h3 class="text-xs sm:text-sm font-bold text-white mb-2.5">Recorded Charging Sessions</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs sm:text-sm tabular-nums">
+            <thead class="text-[10px] sm:text-xs uppercase text-slate-400 border-b border-slate-800">
+              <tr>
+                <th class="py-2 px-2.5 sm:px-3">Date / Time</th>
+                <th class="py-2 px-2.5 sm:px-3">SoC</th>
+                <th class="py-2 px-2.5 sm:px-3">Added</th>
+                <th class="py-2 px-2.5 sm:px-3">Power</th>
+                <th class="py-2 px-2.5 sm:px-3">Duration</th>
+              </tr>
+            </thead>
+            <tbody id="charges-table-body" class="divide-y divide-slate-800/70">
+              <tr><td colspan="5" class="py-4 text-center text-slate-500">No charging sessions recorded yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- TAB 3: TRIP HISTORY LIST                   -->
+    <!-- ========================================== -->
+    <section id="view-trips" class="hidden space-y-3.5 sm:space-y-4">
+      <div class="card p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div>
+          <h2 class="text-sm sm:text-base font-bold text-white">Recorded Trip History</h2>
+          <p class="text-[11px] sm:text-xs text-slate-400">Tap any drive to inspect the Kathmandu GPS route & telemetry charts</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input
+            id="trip-search"
+            type="text"
+            placeholder="Filter trips..."
+            oninput="renderTripsTable()"
+            class="flex-1 sm:w-48 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-sky-500"
+          />
+          <button onclick="refreshOverviewAndTrips()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 border border-slate-700 shrink-0">
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Mobile Card List (Shown on phones, hidden on md+ screens) -->
+      <div id="trips-mobile-list" class="md:hidden space-y-2.5"></div>
+
+      <!-- Desktop Table (Shown on md+ screens, kept in DOM for automated tests) -->
+      <div class="card overflow-hidden hidden md:block">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs sm:text-sm tabular-nums">
+            <thead class="text-xs uppercase text-slate-400 bg-slate-900/90 border-b border-slate-800">
+              <tr>
+                <th class="py-3 px-4">Trip</th>
+                <th class="py-3 px-4">Date & Time (NPT)</th>
+                <th class="py-3 px-4">Distance</th>
+                <th class="py-3 px-4">Odometer (Start → End)</th>
+                <th class="py-3 px-4">Duration</th>
+                <th class="py-3 px-4">Battery SoC</th>
+                <th class="py-3 px-4">Energy & Regen</th>
+                <th class="py-3 px-4">Efficiency</th>
+                <th class="py-3 px-4">Speed (Avg / Max)</th>
+                <th class="py-3 px-4 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="trips-table-body" class="divide-y divide-slate-800/70">
+              <tr><td colspan="10" class="py-8 text-center text-slate-500">Loading trips...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- VIEW 4: TRIP DETAIL PAGE                   -->
+    <!-- ========================================== -->
+    <section id="view-trip-detail" class="hidden space-y-3.5 sm:space-y-4">
+      <!-- Top Bar & Export Actions -->
+      <div class="card p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <button onclick="switchTab('trips')" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 shrink-0">
+            ← Back
+          </button>
+          <div class="min-w-0">
+            <h2 id="detail-title" class="text-sm sm:text-lg font-bold text-white truncate">Trip #—</h2>
+            <p id="detail-subtitle" class="text-[11px] sm:text-xs text-slate-400 truncate">—</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <a id="detail-export-gpx" href="#" class="flex-1 sm:flex-initial text-center px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-xs font-semibold text-white transition">
+            GPX
+          </a>
+          <a id="detail-export-csv" href="#" class="flex-1 sm:flex-initial text-center px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white transition">
+            CSV
+          </a>
+          <button id="detail-delete-btn" class="px-3 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-xs font-medium text-rose-300 border border-rose-800/60 transition">
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <!-- Trip Key Metrics Row (3x2 on Mobile, 6-col on Desktop) -->
+      <div class="grid grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3 tabular-nums">
+        <div class="card p-2.5 sm:p-3.5">
+          <div class="text-[10px] sm:text-[11px] font-semibold text-slate-400">DISTANCE</div>
+          <div id="detail-dist" class="text-base sm:text-2xl font-extrabold text-white mt-0.5 truncate">— km</div>
+          <div id="detail-odo-span" class="text-[10px] sm:text-[11px] text-amber-300 mt-0.5 truncate">Odo: —</div>
+        </div>
+        <div class="card p-2.5 sm:p-3.5">
+          <div class="text-[10px] sm:text-[11px] font-semibold text-slate-400">DURATION</div>
+          <div id="detail-dur" class="text-base sm:text-2xl font-extrabold text-sky-300 mt-0.5 truncate">—</div>
+          <div id="detail-points-count" class="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">0 pts</div>
+        </div>
+        <div class="card p-2.5 sm:p-3.5">
+          <div class="text-[10px] sm:text-[11px] font-semibold text-slate-400">SoC USED</div>
+          <div id="detail-soc" class="text-base sm:text-2xl font-extrabold text-emerald-400 mt-0.5 truncate">—%</div>
+          <div id="detail-soc-span" class="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">—% → —%</div>
+        </div>
+        <div class="card p-2.5 sm:p-3.5">
+          <div class="text-[10px] sm:text-[11px] font-semibold text-slate-400">NET ENERGY</div>
+          <div id="detail-kwh" class="text-base sm:text-2xl font-extrabold text-white mt-0.5 truncate">— kWh</div>
+          <div id="detail-regen" class="text-[10px] sm:text-[11px] text-emerald-400 mt-0.5 truncate">Regen: —</div>
+        </div>
+        <div class="card p-2.5 sm:p-3.5">
+          <div class="text-[10px] sm:text-[11px] font-semibold text-slate-400">EFFICIENCY</div>
+          <div id="detail-eff" class="text-base sm:text-2xl font-extrabold text-amber-300 mt-0.5 truncate">— Wh/km</div>
+          <div id="detail-km-kwh" class="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">— km/kWh</div>
+        </div>
+        <div class="card p-2.5 sm:p-3.5">
+          <div class="text-[10px] sm:text-[11px] font-semibold text-slate-400">AVG / MAX</div>
+          <div id="detail-speed" class="text-base sm:text-2xl font-extrabold text-indigo-300 mt-0.5 truncate">— / —</div>
+          <div class="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">km/h</div>
+        </div>
+      </div>
+
+      <!-- Trip Route Map on Kathmandu Streets -->
+      <div class="card p-2.5 sm:p-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div class="min-w-0">
+            <h3 class="text-xs sm:text-sm font-bold text-white truncate">Trip Route Map — Touch or hover charts to scrub</h3>
+            <p id="detail-hover-readout" class="text-[11px] sm:text-xs text-sky-400 truncate tabular-nums">
+              Green pin = Start • Red pin = End • Line color = Speed / Power
+            </p>
+          </div>
+          <div class="flex items-center gap-1.5 text-xs shrink-0">
+            <button id="color-by-speed" onclick="setRouteColorMode('speed')" class="px-2.5 py-1 rounded-lg bg-sky-600 text-white text-[11px] font-semibold">
+              Speed
+            </button>
+            <button id="color-by-power" onclick="setRouteColorMode('power')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-semibold">
+              Power / Regen
+            </button>
+          </div>
+        </div>
+        <div class="detail-map-wrap">
+          <div id="detail-map" class="w-full h-[280px] sm:h-[400px]"></div>
+          <div id="detail-map-empty" class="detail-map-empty" hidden>
+            <div class="detail-map-empty-box">
+              <div class="detail-map-empty-title">No GPS route recorded for this trip</div>
+              <div class="detail-map-empty-body">The car's connection to the server dropped during this drive, so only its end-of-trip summary (distance, energy, SoC) was received.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Synchronized Telemetry Timeline Charts -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4">
+        <div class="card p-3.5 sm:p-4">
+          <h3 class="text-xs sm:text-sm font-bold text-white mb-2">Speed (km/h) & Altitude (m)</h3>
+          <div class="h-52 sm:h-64">
+            <canvas id="chart-trip-speed"></canvas>
+          </div>
+        </div>
+        <div class="card p-3.5 sm:p-4">
+          <h3 class="text-xs sm:text-sm font-bold text-white mb-2">Battery SoC (%) & Motor Power / Regen (kW)</h3>
+          <div class="h-52 sm:h-64">
+            <canvas id="chart-trip-power"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Native-Feel Mobile Bottom Navigation Bar (Visible on phones/small tablets, hidden on md+) -->
+  <nav class="md:hidden fixed bottom-0 inset-x-0 z-50 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 px-2 pb-[env(safe-area-inset-bottom)]">
+    <div class="grid grid-cols-3 h-14">
+      <button id="mob-tab-live" onclick="switchTab('live')" class="mobile-nav-btn active relative flex flex-col items-center justify-center gap-0.5 text-slate-400 transition">
+        <span class="nav-indicator absolute top-0 w-10 h-0.5 rounded-full bg-sky-400 opacity-0 scale-x-50 transition-all"></span>
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+        </svg>
+        <span class="text-[11px] font-semibold">Live Status</span>
+      </button>
+
+      <button id="mob-tab-mileage" onclick="switchTab('mileage')" class="mobile-nav-btn relative flex flex-col items-center justify-center gap-0.5 text-slate-400 transition">
+        <span class="nav-indicator absolute top-0 w-10 h-0.5 rounded-full bg-sky-400 opacity-0 scale-x-50 transition-all"></span>
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+        </svg>
+        <span class="text-[11px] font-semibold">Mileage</span>
+      </button>
+
+      <button id="mob-tab-trips" onclick="switchTab('trips')" class="mobile-nav-btn relative flex flex-col items-center justify-center gap-0.5 text-slate-400 transition">
+        <span class="nav-indicator absolute top-0 w-10 h-0.5 rounded-full bg-sky-400 opacity-0 scale-x-50 transition-all"></span>
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
+        </svg>
+        <span class="text-[11px] font-semibold">Trips</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Trip Start & Push Notification Settings Modal -->
+  <div id="notif-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="card w-full max-w-lg p-4 sm:p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div>
+          <h3 class="text-sm sm:text-base font-bold text-white">Trip Start & Push Notifications</h3>
+          <p class="text-[11px] sm:text-xs text-slate-400">Get instant alerts on your Samsung S22+ when your BYD Atto 3 starts a drive</p>
+        </div>
+        <button onclick="closeNotifModal()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm">✕</button>
+      </div>
+
+      <!-- Event Triggers -->
+      <div class="grid grid-cols-2 gap-2.5">
+        <label class="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center gap-2 text-xs text-white cursor-pointer">
+          <input type="checkbox" id="cfg-trip-start" checked class="accent-sky-500 w-4 h-4" />
+          <span>Notify on <b>Trip Start</b></span>
+        </label>
+        <label class="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center gap-2 text-xs text-white cursor-pointer">
+          <input type="checkbox" id="cfg-trip-end" checked class="accent-sky-500 w-4 h-4" />
+          <span>Notify on <b>Trip End</b></span>
+        </label>
+      </div>
+
+      <!-- 1. ntfy.sh Instant Mobile Push (Zero Account Required) -->
+      <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-xs sm:text-sm font-bold text-sky-300">📱 Mobile Push via ntfy (Recommended)</div>
+            <div class="text-[11px] text-slate-400">Works even when Chrome is closed & phone is locked</div>
+          </div>
+          <input type="checkbox" id="cfg-ntfy-enabled" checked class="accent-sky-500 w-4 h-4" />
+        </div>
+        <div>
+          <label class="text-[11px] text-slate-400 block mb-1">Private Topic Name (subscribe to this in the free <b>ntfy</b> Android app)</label>
+          <div class="flex items-center gap-2">
+            <input id="cfg-ntfy-topic" type="text" value="byd-telemetry-alerts" class="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white font-mono" />
+            <a id="ntfy-subscribe-link" href="ntfy://ntfy.sh/byd-telemetry-alerts" class="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-xs font-semibold text-white whitespace-nowrap">
+              Open App →
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Browser Notifications -->
+      <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2">
+        <div>
+          <div class="text-xs font-bold text-white">🔔 Web Browser Alerts & Live Toast</div>
+          <div id="browser-perm-status" class="text-[11px] text-slate-400">Shows an instant banner & sound while dashboard is open</div>
+        </div>
+        <button onclick="enableBrowserNotifications()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-sky-300 border border-slate-700 shrink-0">
+          Enable Browser Alert
+        </button>
+      </div>
+
+      <!-- 3. Optional Telegram Bot -->
+      <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+        <div class="flex items-center justify-between">
+          <div class="text-xs font-bold text-white">✈️ Telegram Bot (Optional)</div>
+          <input type="checkbox" id="cfg-tg-enabled" class="accent-sky-500 w-4 h-4" />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input id="cfg-tg-token" type="password" placeholder="Bot Token (123456:ABC...)" class="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white" />
+          <input id="cfg-tg-chat" type="text" placeholder="Chat ID (e.g. 123456789)" class="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white" />
+        </div>
+      </div>
+
+      <!-- Save & Test Buttons -->
+      <div class="flex items-center gap-2 pt-1">
+        <button onclick="saveNotifSettings()" class="flex-1 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-xs sm:text-sm font-bold text-white transition">
+          Save Settings
+        </button>
+        <button id="test-notif-btn" onclick="sendTestNotif()" class="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold text-white transition">
+          🚗 Test "Trip Started"
+        </button>
+      </div>
+      <div id="notif-save-msg" class="hidden text-center text-xs text-emerald-400 font-medium"></div>
+
+      <!-- Recent Notification Feed -->
+      <div class="border-t border-slate-800 pt-3">
+        <div class="text-xs font-bold text-slate-300 mb-2">Recent Trip Alerts</div>
+        <div id="notif-history-list" class="space-y-2 max-h-40 overflow-y-auto text-xs">
+          <div class="text-slate-500 text-center py-2">No notifications triggered yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const KATHMANDU_CENTER = [27.7172, 85.3240];
+    const ATTO3_BATTERY_KWH = 60.48;
+    let liveMap = null;
+    let liveCarMarker = null;
+    let liveRouteLine = null;
+    let liveRouteCoords = [];
+    let activeTripId = null;
+
+    let detailMap = null;
+    let detailRouteGroup = null;
+    let detailHoverMarker = null;
+    let detailLiveMarker = null;
+    let detailLiveTrail = null;
+    let currentDetailTrip = null;
+    let currentDetailPoints = [];
+    let routeColorMode = 'speed';
+
+    let dailyKmChart = null;
+    let dailyEffChart = null;
+    let tripSpeedChart = null;
+    let tripPowerChart = null;
+
+    let allTrips = [];
+
+    function createTileLayers() {
+      const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap'
+      });
+      const dark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 20,
+        attribution: '© CARTO'
+      });
+      const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        attribution: '© Esri'
+      });
+      return { "Kathmandu Street Map": street, "Dark Telemetry Map": dark, "Satellite": satellite };
+    }
+
+    function makeCarIcon(heading, live = false) {
+      const rot = Number.isFinite(heading) ? heading : 0;
+      const rings = live ? `<div class="live-beacon"></div><div class="live-beacon delay"></div>` : '';
+      return L.divIcon({
+        className: 'car-marker-wrap',
+        iconSize: [40, 40],
+        iconAnchor: [20, 20],
+        html: `
+          ${rings}
+          <div class="car-core${live ? ' live' : ''}" style="transform: rotate(${rot}deg);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+              <path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>
+            </svg>
+          </div>
+        `
+      });
+    }
+
+    // Pulsing "current location" dot used on the trip-detail map for an in-progress trip
+    function makeLiveDotIcon() {
+      return L.divIcon({
+        className: 'car-marker-wrap',
+        iconSize: [34, 34],
+        iconAnchor: [17, 17],
+        html: `<div class="live-beacon"></div><div class="live-beacon delay"></div><div class="live-dot-core"></div>`
+      });
+    }
+
+    // Update the live car marker without recreating its DOM on every telemetry tick
+    // (recreating the icon restarts the CSS animation, so the pulse would never be visible).
+    let liveCarIsLive = null;
+    function updateLiveCarMarker(heading, live) {
+      if (!liveCarMarker) return;
+      if (live !== liveCarIsLive) {
+        liveCarIsLive = live;
+        liveCarMarker.setIcon(makeCarIcon(heading, live));
+        liveCarMarker.setZIndexOffset(live ? 1000 : 0);
+        return;
+      }
+      const el = liveCarMarker.getElement();
+      const core = el && el.querySelector('.car-core');
+      if (core && Number.isFinite(heading)) core.style.transform = `rotate(${heading}deg)`;
+    }
+
+    function initMaps() {
+      const liveLayers = createTileLayers();
+      liveMap = L.map('live-map', {
+        center: KATHMANDU_CENTER,
+        zoom: 14,
+        layers: [liveLayers["Kathmandu Street Map"]]
+      });
+      L.control.layers(liveLayers).addTo(liveMap);
+
+      liveRouteLine = L.polyline([], { color: '#38bdf8', weight: 4, opacity: 0.9 }).addTo(liveMap);
+      liveCarMarker = L.marker(KATHMANDU_CENTER, { icon: makeCarIcon(0) }).addTo(liveMap);
+      liveCarMarker.bindPopup("<b>BYD Atto 3</b><br>Kathmandu, Nepal");
+
+      const detailLayers = createTileLayers();
+      detailMap = L.map('detail-map', {
+        center: KATHMANDU_CENTER,
+        zoom: 13,
+        layers: [detailLayers["Kathmandu Street Map"]]
+      });
+      L.control.layers(detailLayers).addTo(detailMap);
+      detailRouteGroup = L.layerGroup().addTo(detailMap);
+    }
+
+    function centerKathmandu() {
+      if (liveMap) liveMap.setView(KATHMANDU_CENTER, 13);
+    }
+
+    function switchTab(tab) {
+      ['live', 'mileage', 'trips', 'trip-detail'].forEach(id => {
+        const el = document.getElementById('view-' + id);
+        if (el) el.classList.add('hidden');
+      });
+      ['live', 'mileage', 'trips'].forEach(id => {
+        const btn = document.getElementById('tab-btn-' + id);
+        if (btn) btn.classList.remove('active');
+        const mobBtn = document.getElementById('mob-tab-' + id);
+        if (mobBtn) mobBtn.classList.remove('active');
+      });
+
+      const target = document.getElementById('view-' + tab);
+      if (target) target.classList.remove('hidden');
+
+      const navKey = tab === 'trip-detail' ? 'trips' : tab;
+      const activeBtn = document.getElementById('tab-btn-' + navKey);
+      if (activeBtn) activeBtn.classList.add('active');
+      const activeMobBtn = document.getElementById('mob-tab-' + navKey);
+      if (activeMobBtn) activeMobBtn.classList.add('active');
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      if (tab === 'live' && liveMap) {
+        setTimeout(() => liveMap.invalidateSize(), 100);
+      }
+      if (tab === 'trip-detail' && detailMap) {
+        setTimeout(() => detailMap.invalidateSize(), 100);
+      }
+    }
+
+    function formatDuration(sec) {
+      if (!sec || sec <= 0) return '0m';
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = Math.floor(sec % 60);
+      if (h > 0) return `${h}h ${m}m`;
+      if (m > 0) return `${m}m ${s}s`;
+      return `${s}s`;
+    }
+
+    function formatNptDate(ms) {
+      if (!ms) return '—';
+      try {
+        return new Date(ms).toLocaleString('en-US', {
+          timeZone: 'Asia/Kathmandu',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+      } catch (e) {
+        return new Date(ms).toLocaleString();
+      }
+    }
+
+    function updateStateUI(state) {
+      if (!state) return;
+
+      const speed = Number(state.speed_kmh || 0).toFixed(1);
+      document.getElementById('live-speed').textContent = speed;
+      document.getElementById('live-gear').textContent = state.gear || 'P';
+      document.getElementById('live-modes').textContent = `${state.drive_mode || 'Normal'} • ${state.regen_mode || 'Standard'}`;
+
+      if (state.soc !== null && state.soc !== undefined) {
+        const socVal = Number(state.soc);
+        document.getElementById('live-soc').textContent = socVal.toFixed(1);
+        document.getElementById('live-soc-bar').style.width = `${Math.min(100, Math.max(0, socVal))}%`;
+        const sohFactor = state.soh ? Number(state.soh) / 100.0 : 1.0;
+        const estKwh = ((socVal / 100.0) * ATTO3_BATTERY_KWH * sohFactor).toFixed(1);
+        document.getElementById('live-remain-kwh').textContent = `~${estKwh} kWh avail`;
+      }
+      if (state.soh) {
+        document.getElementById('live-soh').textContent = `SoH ${Number(state.soh).toFixed(0)}%`;
+      }
+      if (state.range_km !== null && state.range_km !== undefined) {
+        document.getElementById('live-range').textContent = Number(state.range_km).toFixed(0);
+      }
+
+      const pwr = Number(state.engine_power_kw || 0);
+      const pwrEl = document.getElementById('live-power');
+      const pwrTag = document.getElementById('live-power-tag');
+      pwrEl.textContent = pwr.toFixed(1);
+      if (pwr < -0.5) {
+        pwrEl.className = 'text-lg sm:text-2xl lg:text-3xl font-extrabold text-emerald-400';
+        pwrTag.textContent = 'REGEN';
+        pwrTag.className = 'text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold';
+      } else if (pwr > 1.0) {
+        pwrEl.className = 'text-lg sm:text-2xl lg:text-3xl font-extrabold text-sky-300';
+        pwrTag.textContent = 'DRIVE';
+        pwrTag.className = 'text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold';
+      } else {
+        pwrEl.className = 'text-lg sm:text-2xl lg:text-3xl font-extrabold text-white';
+        pwrTag.textContent = 'IDLE';
+        pwrTag.className = 'text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-bold';
+      }
+
+      const hvVolt = state.hv_voltage ? `${state.hv_voltage.toFixed(0)}V` : '—V';
+      const hvAmp = state.hv_current ? ` • ${state.hv_current.toFixed(1)}A` : '';
+      document.getElementById('live-hv-stats').textContent = `HV: ${hvVolt}${hvAmp}`;
+
+      if (state.odometer_km) {
+        const odoStr = Number(state.odometer_km).toLocaleString(undefined, { maximumFractionDigits: 1 });
+        document.getElementById('live-odo').textContent = odoStr;
+        document.getElementById('header-odo').textContent = `Odometer: ${odoStr} km`;
+      }
+
+      document.getElementById('live-12v').textContent = state.aux_12v_voltage ? Number(state.aux_12v_voltage).toFixed(2) : '—';
+      if (state.ext_temp_c !== null && state.ext_temp_c !== undefined) {
+        window._lastExtTempC = state.ext_temp_c;
+      }
+      const extVal = state.ext_temp_c ?? window._lastExtTempC ?? 15;
+      const lockStatus = state.car_locked ? 'Locked' : 'Unlocked';
+      document.getElementById('live-lock-tag').textContent = state.car_locked ? '🔒' : '🔓';
+      document.getElementById('live-temps').textContent = `${lockStatus} • ${extVal}°C`;
+
+      // Car state badge
+      const carBadge = document.getElementById('car-state-badge');
+      if (state.is_charging) {
+        carBadge.textContent = `⚡ Charging (${state.charging_power_kw || 0} kW)`;
+        carBadge.className = 'px-2 py-0.5 text-[10px] sm:text-xs font-semibold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 whitespace-nowrap';
+      } else if (state.car_on) {
+        carBadge.textContent = `Ready (${state.gear || 'P'})`;
+        carBadge.className = 'px-2 py-0.5 text-[10px] sm:text-xs font-semibold rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/40 whitespace-nowrap';
+      } else {
+        carBadge.textContent = 'Parked';
+        carBadge.className = 'px-2 py-0.5 text-[10px] sm:text-xs font-semibold rounded-full bg-slate-800 text-slate-400 border border-slate-700 whitespace-nowrap';
+      }
+
+      // Tires
+      document.getElementById('tire-lf-psi').textContent = state.tire_lf_psi ?? '—';
+      document.getElementById('tire-rf-psi').textContent = state.tire_rf_psi ?? '—';
+      document.getElementById('tire-lr-psi').textContent = state.tire_lr_psi ?? '—';
+      document.getElementById('tire-rr-psi').textContent = state.tire_rr_psi ?? '—';
+      document.getElementById('tire-lf-c').textContent = state.tire_lf_c ?? '—';
+      document.getElementById('tire-rf-c').textContent = state.tire_rf_c ?? '—';
+      document.getElementById('tire-lr-c').textContent = state.tire_lr_c ?? '—';
+      document.getElementById('tire-rr-c').textContent = state.tire_rr_c ?? '—';
+
+      // Blade Battery Cell diagnostics
+      if (state.cell_min_v && state.cell_max_v) {
+        document.getElementById('cell-min-max').textContent = `${state.cell_min_v.toFixed(3)} / ${state.cell_max_v.toFixed(3)} V`;
+        const spreadMv = Math.round((state.cell_max_v - state.cell_min_v) * 1000);
+        document.getElementById('cell-delta-mv').textContent = `${spreadMv} mV`;
+      }
+      if (state.total_discharge_kwh) {
+        document.getElementById('total-discharge').textContent = `${Number(state.total_discharge_kwh).toFixed(1)} kWh`;
+      }
+      const cabPart = state.cabin_temp_c != null ? `${state.cabin_temp_c}°C / ` : '';
+      document.getElementById('cabin-ext-temp').textContent = `${cabPart}Ext ${extVal}°C`;
+      document.getElementById('last-seen').textContent = formatNptDate(state.timestamp_ms);
+
+      // Update live map marker
+      if (liveMap && liveCarMarker && state.lat && state.lon && Math.abs(state.lat) > 0.01) {
+        const pos = [state.lat, state.lon];
+        liveCarMarker.setLatLng(pos);
+        const isLive = Boolean(activeTripId) || Boolean(state.car_on);
+        updateLiveCarMarker(state.heading || 0, isLive);
+        liveCarMarker.setPopupContent(
+          `<b>BYD Atto 3 (${state.gear || 'P'})</b><br>Speed: ${speed} km/h • SoC: ${state.soc ?? '—'}%<br>Power: ${pwr.toFixed(1)} kW`
+        );
+        document.getElementById('live-coords-text').textContent =
+          `${state.lat.toFixed(5)}° N, ${state.lon.toFixed(5)}° E • Alt: ${state.alt ?? '—'}m`;
+
+        if (state.car_on && (state.speed_kmh > 0.5 || state.gear !== 'P')) {
+          liveRouteCoords.push(pos);
+          liveRouteLine.setLatLngs(liveRouteCoords);
+        }
+        if (document.getElementById('follow-car-toggle').checked) {
+          liveMap.panTo(pos);
+        }
+      }
+    }
+
+    function updateMileageCharts(dailySeries) {
+      const labels = dailySeries.map(d => d.day.slice(5));
+      const kmData = dailySeries.map(d => d.distance_km);
+      const effData = dailySeries.map(d => d.wh_per_km);
+
+      if (dailyKmChart) dailyKmChart.destroy();
+      dailyKmChart = new Chart(document.getElementById('chart-daily-km'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Distance (km)',
+            data: kmData,
+            backgroundColor: 'rgba(56, 189, 248, 0.7)',
+            borderColor: '#38bdf8',
+            borderWidth: 1,
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(51,65,85,0.3)' } },
+            y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(51,65,85,0.3)' }, beginAtZero: true }
+          }
+        }
+      });
+
+      if (dailyEffChart) dailyEffChart.destroy();
+      dailyEffChart = new Chart(document.getElementById('chart-daily-eff'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Consumption (Wh/km)',
+            data: effData,
+            borderColor: '#34d399',
+            backgroundColor: 'rgba(52, 211, 153, 0.15)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(51,65,85,0.3)' } },
+            y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(51,65,85,0.3)' } }
+          }
+        }
+      });
+    }
+
+    function renderTripsTable() {
+      const q = (document.getElementById('trip-search')?.value || '').toLowerCase();
+      const tbody = document.getElementById('trips-table-body');
+      const mobileList = document.getElementById('trips-mobile-list');
+      const mini = document.getElementById('recent-trips-mini');
+
+      const filtered = allTrips.filter(t => {
+        if (!q) return true;
+        const dtStr = formatNptDate(t.start_time_ms).toLowerCase();
+        const effStr = String(Math.round(t.efficiency_wh_km || 0));
+        return dtStr.includes(q) || String(t.id).includes(q) || String(t.distance_km).includes(q) || effStr.includes(q);
+      });
+
+      if (allTrips.length > 0) {
+        mini.innerHTML = allTrips.slice(0, 4).map(t => `
+          <div onclick="openTripDetail(${t.id})" class="p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 flex items-center justify-between cursor-pointer transition tabular-nums">
+            <div>
+              <div class="font-semibold text-white">Trip #${t.id} • ${Number(t.distance_km || 0).toFixed(2)} km</div>
+              <div class="text-[11px] text-slate-400">${formatNptDate(t.start_time_ms)} • ${formatDuration(t.duration_s)}</div>
+            </div>
+            <div class="text-right">
+              <div class="text-emerald-400 font-semibold">${Number(t.efficiency_wh_km || 0).toFixed(0)} Wh/km</div>
+              <div class="text-[11px] text-slate-400">${t.start_soc ?? '—'}% → ${t.end_soc ?? '—'}%</div>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        mini.innerHTML = `<div class="text-slate-500 py-3 text-center">No trips recorded yet.</div>`;
+      }
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" class="py-8 text-center text-slate-500">No matching trips found.</td></tr>`;
+        if (mobileList) {
+          mobileList.innerHTML = `<div class="card p-6 text-center text-xs text-slate-500">No matching trips found.</div>`;
+        }
+        return;
+      }
+
+      if (mobileList) {
+        mobileList.innerHTML = filtered.map(t => {
+          const dist = Number(t.distance_km || 0).toFixed(2);
+          const kwh = Number(t.energy_kwh || 0).toFixed(2);
+          const whKm = Number(t.efficiency_wh_km || 0).toFixed(0);
+          const odoSpan = (t.start_odo && t.end_odo) ? `${Number(t.start_odo).toFixed(1)} → ${Number(t.end_odo).toFixed(1)} km` : '—';
+          return `
+            <div onclick="openTripDetail(${t.id})" class="card p-3.5 active:scale-[0.99] transition cursor-pointer tabular-nums">
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-sky-300 font-bold text-xs">#${t.id}</span>
+                  <span class="text-xs text-slate-300 font-medium">${formatNptDate(t.start_time_ms)}</span>
+                </div>
+                <span class="text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-full">${whKm} Wh/km</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2 py-2 border-y border-slate-800/80 text-xs">
+                <div>
+                  <div class="text-[10px] text-slate-400">DISTANCE</div>
+                  <div class="font-extrabold text-white text-sm mt-0.5">${dist} km</div>
+                </div>
+                <div>
+                  <div class="text-[10px] text-slate-400">BATTERY SoC</div>
+                  <div class="font-bold text-emerald-400 text-xs mt-0.5">${t.start_soc ?? '—'}% → ${t.end_soc ?? '—'}%</div>
+                </div>
+                <div>
+                  <div class="text-[10px] text-slate-400">DURATION / KWH</div>
+                  <div class="font-semibold text-slate-200 text-xs mt-0.5">${formatDuration(t.duration_s)} • ${kwh} kWh</div>
+                </div>
+              </div>
+              <div class="flex items-center justify-between mt-2 text-[11px] text-slate-400">
+                <span>Odo: ${odoSpan}</span>
+                <span class="text-sky-400 font-semibold">Route & Charts →</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      tbody.innerHTML = filtered.map(t => {
+        const dist = Number(t.distance_km || 0).toFixed(2);
+        const kwh = Number(t.energy_kwh || 0).toFixed(2);
+        const regen = Number(t.regen_kwh || 0).toFixed(2);
+        const whKm = Number(t.efficiency_wh_km || 0).toFixed(0);
+        const kmKwh = t.energy_kwh > 0.01 ? (t.distance_km / t.energy_kwh).toFixed(2) : '—';
+        const odoSpan = (t.start_odo && t.end_odo) ? `${Number(t.start_odo).toFixed(1)} → ${Number(t.end_odo).toFixed(1)} km` : '—';
+        const statusBadge = t.status === 'active'
+          ? `<span class="ml-1.5 px-1.5 py-0.5 text-[10px] rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">LIVE</span>`
+          : '';
+
+        return `
+          <tr onclick="openTripDetail(${t.id})" class="hover:bg-slate-900/90 cursor-pointer transition">
+            <td class="py-3 px-4 font-semibold text-white">#${t.id}${statusBadge}</td>
+            <td class="py-3 px-4 text-slate-300">${formatNptDate(t.start_time_ms)}</td>
+            <td class="py-3 px-4 font-bold text-sky-300">${dist} km</td>
+            <td class="py-3 px-4 text-slate-300">${odoSpan}</td>
+            <td class="py-3 px-4 text-slate-300">${formatDuration(t.duration_s)}</td>
+            <td class="py-3 px-4">
+              <span class="text-emerald-400 font-medium">${t.start_soc ?? '—'}% → ${t.end_soc ?? '—'}%</span>
+              <span class="text-xs text-slate-400 ml-1">(-${Number(t.soc_used || 0).toFixed(1)}%)</span>
+            </td>
+            <td class="py-3 px-4">
+              <span class="text-white font-medium">${kwh} kWh</span>
+              <span class="text-xs text-emerald-400 block">Regen: +${regen} kWh</span>
+            </td>
+            <td class="py-3 px-4">
+              <span class="text-amber-300 font-semibold">${whKm} Wh/km</span>
+              <span class="text-xs text-slate-400 block">${kmKwh} km/kWh</span>
+            </td>
+            <td class="py-3 px-4 text-slate-300">${Number(t.avg_speed_kmh || 0).toFixed(1)} / ${Number(t.max_speed_kmh || 0).toFixed(1)} km/h</td>
+            <td class="py-3 px-4 text-right">
+              <button class="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 text-xs font-medium border border-sky-500/30">
+                Route & Charts →
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function speedColor(spd) {
+      if (spd < 15) return '#38bdf8';
+      if (spd < 35) return '#34d399';
+      if (spd < 55) return '#fbbf24';
+      return '#f43f5e';
+    }
+
+    function powerColor(kw) {
+      if (kw < -1.0) return '#10b981';
+      if (kw < 12) return '#38bdf8';
+      if (kw < 30) return '#f59e0b';
+      return '#ef4444';
+    }
+
+    function setRouteColorMode(mode) {
+      routeColorMode = mode;
+      document.getElementById('color-by-speed').className =
+        mode === 'speed' ? 'px-2.5 py-1 rounded-lg bg-sky-600 text-white text-[11px] font-semibold' : 'px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-semibold';
+      document.getElementById('color-by-power').className =
+        mode === 'power' ? 'px-2.5 py-1 rounded-lg bg-sky-600 text-white text-[11px] font-semibold' : 'px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-semibold';
+      drawDetailRoute();
+    }
+
+    function drawDetailRoute() {
+      if (!detailRouteGroup || !detailMap) return;
+      detailRouteGroup.clearLayers();
+
+      const validPts = currentDetailPoints.filter(p => p.lat && p.lon && Math.abs(p.lat) > 0.01);
+      const emptyOverlay = document.getElementById('detail-map-empty');
+      if (emptyOverlay) emptyOverlay.hidden = validPts.length > 0;
+      if (validPts.length === 0) return;
+
+      const bounds = [];
+      for (let i = 0; i < validPts.length - 1; i++) {
+        const p1 = validPts[i];
+        const p2 = validPts[i + 1];
+        const color = routeColorMode === 'speed' ? speedColor(p2.speed_kmh || 0) : powerColor(p2.engine_power_kw || 0);
+        L.polyline([[p1.lat, p1.lon], [p2.lat, p2.lon]], {
+          color,
+          weight: 5,
+          opacity: 0.92
+        }).addTo(detailRouteGroup);
+        bounds.push([p1.lat, p1.lon]);
+      }
+      const lastPt = validPts[validPts.length - 1];
+      bounds.push([lastPt.lat, lastPt.lon]);
+
+      const firstPt = validPts[0];
+      L.circleMarker([firstPt.lat, firstPt.lon], {
+        radius: 8,
+        fillColor: '#10b981',
+        color: '#ffffff',
+        weight: 2,
+        fillOpacity: 1
+      }).bindPopup(`<b>Trip Start</b><br>${formatNptDate(firstPt.timestamp_ms)}<br>SoC: ${firstPt.soc ?? '—'}%`).addTo(detailRouteGroup);
+
+      const isLiveTrip = currentDetailTrip && currentDetailTrip.status === 'active';
+      detailLiveMarker = null;
+      detailLiveTrail = null;
+      if (isLiveTrip) {
+        // Trip still in progress: show a pulsing "current location" beacon instead of an end pin
+        detailLiveTrail = L.polyline([[lastPt.lat, lastPt.lon]], {
+          color: '#10b981',
+          weight: 5,
+          opacity: 0.92
+        }).addTo(detailRouteGroup);
+        detailLiveMarker = L.marker([lastPt.lat, lastPt.lon], {
+          icon: makeLiveDotIcon(),
+          zIndexOffset: 1000
+        }).bindPopup(`<b>Current Location (Live)</b><br>${formatNptDate(lastPt.timestamp_ms)}<br>SoC: ${lastPt.soc ?? '—'}%`).addTo(detailRouteGroup);
+      } else {
+        L.circleMarker([lastPt.lat, lastPt.lon], {
+          radius: 8,
+          fillColor: '#f43f5e',
+          color: '#ffffff',
+          weight: 2,
+          fillOpacity: 1
+        }).bindPopup(`<b>Trip End</b><br>${formatNptDate(lastPt.timestamp_ms)}<br>SoC: ${lastPt.soc ?? '—'}%`).addTo(detailRouteGroup);
+      }
+
+      detailHoverMarker = L.circleMarker([firstPt.lat, firstPt.lon], {
+        radius: 9,
+        fillColor: '#38bdf8',
+        color: '#ffffff',
+        weight: 3,
+        fillOpacity: 1
+      }).addTo(detailRouteGroup);
+
+      detailMap.fitBounds(bounds, { padding: [28, 28] });
+    }
+
+    function highlightPointOnDetailMap(idx) {
+      if (!currentDetailPoints || idx < 0 || idx >= currentDetailPoints.length) return;
+      const pt = currentDetailPoints[idx];
+      if (pt && pt.lat && pt.lon && detailHoverMarker) {
+        detailHoverMarker.setLatLng([pt.lat, pt.lon]);
+        document.getElementById('detail-hover-readout').textContent =
+          `Time: ${formatNptDate(pt.timestamp_ms)} • Speed: ${(pt.speed_kmh || 0).toFixed(1)} km/h • Power: ${(pt.engine_power_kw || 0).toFixed(1)} kW • SoC: ${pt.soc ?? '—'}% • Alt: ${pt.alt ?? '—'}m`;
+      }
+    }
+
+    async function openTripDetail(tripId) {
+      switchTab('trip-detail');
+      const res = await fetch(`/api/trips/${tripId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const t = data.trip;
+      currentDetailTrip = t;
+      currentDetailPoints = data.points || [];
+
+      document.getElementById('detail-title').textContent = `Trip #${t.id} — ${Number(t.distance_km || 0).toFixed(2)} km in Kathmandu`;
+      document.getElementById('detail-subtitle').textContent =
+        `${formatNptDate(t.start_time_ms)} → ${formatNptDate(t.end_time_ms)} (${t.status.toUpperCase()})`;
+
+      document.getElementById('detail-export-gpx').href = `/api/trips/${t.id}/export.gpx`;
+      document.getElementById('detail-export-csv').href = `/api/trips/${t.id}/export.csv`;
+      document.getElementById('detail-delete-btn').onclick = async () => {
+        if (confirm(`Delete Trip #${t.id}?`)) {
+          await fetch(`/api/trips/${t.id}`, { method: 'DELETE' });
+          await refreshOverviewAndTrips();
+          switchTab('trips');
+        }
+      };
+
+      document.getElementById('detail-dist').textContent = `${Number(t.distance_km || 0).toFixed(2)} km`;
+      document.getElementById('detail-odo-span').textContent =
+        (t.start_odo && t.end_odo) ? `Odo: ${Number(t.start_odo).toFixed(1)} → ${Number(t.end_odo).toFixed(1)} km` : 'Odo: —';
+      document.getElementById('detail-dur').textContent = formatDuration(t.duration_s);
+      document.getElementById('detail-points-count').textContent = `${currentDetailPoints.length} samples`;
+      document.getElementById('detail-soc').textContent = `-${Number(t.soc_used || 0).toFixed(1)}%`;
+      document.getElementById('detail-soc-span').textContent = `${t.start_soc ?? '—'}% → ${t.end_soc ?? '—'}%`;
+      document.getElementById('detail-kwh').textContent = `${Number(t.energy_kwh || 0).toFixed(2)} kWh`;
+      document.getElementById('detail-regen').textContent = `Regen: +${Number(t.regen_kwh || 0).toFixed(2)} kWh`;
+      document.getElementById('detail-eff').textContent = `${Number(t.efficiency_wh_km || 0).toFixed(0)} Wh/km`;
+      const kmKwh = t.energy_kwh > 0.01 ? (t.distance_km / t.energy_kwh).toFixed(2) : '—';
+      document.getElementById('detail-km-kwh').textContent = `${kmKwh} km/kWh`;
+      document.getElementById('detail-speed').textContent = `${Number(t.avg_speed_kmh || 0).toFixed(1)} / ${Number(t.max_speed_kmh || 0).toFixed(1)}`;
+
+      setTimeout(() => {
+        detailMap.invalidateSize();
+        drawDetailRoute();
+      }, 120);
+
+      const labels = currentDetailPoints.map(p => {
+        const d = new Date(p.timestamp_ms);
+        return d.toLocaleTimeString('en-US', { timeZone: 'Asia/Kathmandu', hour12: false });
+      });
+      const speeds = currentDetailPoints.map(p => p.speed_kmh || 0);
+      const alts = currentDetailPoints.map(p => p.alt || 1300);
+      const socs = currentDetailPoints.map(p => p.soc || 0);
+      const powers = currentDetailPoints.map(p => p.engine_power_kw || 0);
+
+      const hoverHandler = (evt, elements) => {
+        if (elements && elements.length > 0) {
+          highlightPointOnDetailMap(elements[0].index);
+        }
+      };
+
+      if (tripSpeedChart) tripSpeedChart.destroy();
+      tripSpeedChart = new Chart(document.getElementById('chart-trip-speed'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Speed (km/h)',
+              data: speeds,
+              borderColor: '#38bdf8',
+              backgroundColor: 'rgba(56, 189, 248, 0.15)',
+              fill: true,
+              tension: 0.25,
+              pointRadius: 0,
+              yAxisID: 'y'
+            },
+            {
+              label: 'Altitude (m)',
+              data: alts,
+              borderColor: '#a78bfa',
+              borderDash: [4, 4],
+              tension: 0.25,
+              pointRadius: 0,
+              yAxisID: 'y1'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          events: ['mousemove', 'mouseout', 'click', 'touchstart', 'touchmove'],
+          interaction: { mode: 'index', intersect: false },
+          onHover: hoverHandler,
+          onClick: hoverHandler,
+          scales: {
+            x: { ticks: { color: '#94a3b8', maxTicksLimit: 6 }, grid: { color: 'rgba(51,65,85,0.25)' } },
+            y: { position: 'left', ticks: { color: '#38bdf8' }, grid: { color: 'rgba(51,65,85,0.25)' }, beginAtZero: true },
+            y1: { position: 'right', ticks: { color: '#a78bfa' }, grid: { display: false } }
+          }
+        }
+      });
+
+      if (tripPowerChart) tripPowerChart.destroy();
+      tripPowerChart = new Chart(document.getElementById('chart-trip-power'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Motor Power / Regen (kW)',
+              data: powers,
+              borderColor: '#f59e0b',
+              backgroundColor: 'rgba(245, 158, 11, 0.12)',
+              fill: true,
+              tension: 0.25,
+              pointRadius: 0,
+              yAxisID: 'y'
+            },
+            {
+              label: 'Battery SoC (%)',
+              data: socs,
+              borderColor: '#10b981',
+              tension: 0.25,
+              pointRadius: 0,
+              yAxisID: 'y1'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          events: ['mousemove', 'mouseout', 'click', 'touchstart', 'touchmove'],
+          interaction: { mode: 'index', intersect: false },
+          onHover: hoverHandler,
+          onClick: hoverHandler,
+          scales: {
+            x: { ticks: { color: '#94a3b8', maxTicksLimit: 6 }, grid: { color: 'rgba(51,65,85,0.25)' } },
+            y: { position: 'left', ticks: { color: '#f59e0b' }, grid: { color: 'rgba(51,65,85,0.25)' } },
+            y1: { position: 'right', ticks: { color: '#10b981' }, grid: { display: false } }
+          }
+        }
+      });
+    }
+
+    async function refreshOverviewAndTrips() {
+      try {
+        const [ovRes, trRes] = await Promise.all([
+          fetch('/api/overview'),
+          fetch('/api/trips')
+        ]);
+        const ov = await ovRes.json();
+        const tr = await trRes.json();
+
+        allTrips = tr.trips || [];
+        renderTripsTable();
+
+        activeTripId = ov.active_trip ? ov.active_trip.id : null;
+        if (ov.state) {
+          updateStateUI(ov.state);
+        }
+
+        const badge = document.getElementById('conn-badge');
+        if (ov.availability === 'online' || ov.state) {
+          badge.textContent = '● MQTT Connected';
+          badge.className = 'px-2 py-0.5 text-[10px] sm:text-xs font-semibold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 whitespace-nowrap';
+        }
+
+        const banner = document.getElementById('active-trip-banner');
+        if (ov.active_trip) {
+          banner.classList.remove('hidden');
+          document.getElementById('banner-trip-id').textContent = `Trip #${ov.active_trip.id}`;
+          document.getElementById('banner-dist').textContent = `${Number(ov.active_trip.distance_km || 0).toFixed(2)} km`;
+          document.getElementById('banner-dur').textContent = formatDuration(ov.active_trip.duration_s);
+          document.getElementById('banner-kwh').textContent = `${Number(ov.active_trip.energy_kwh || 0).toFixed(2)} kWh`;
+          document.getElementById('banner-eff').textContent = `${Number(ov.active_trip.efficiency_wh_km || 0).toFixed(0)} Wh/km`;
+          document.getElementById('banner-view-btn').onclick = () => openTripDetail(ov.active_trip.id);
+
+          if (ov.active_route && ov.active_route.length > 0) {
+            liveRouteCoords = ov.active_route.map(p => [p.lat, p.lon]);
+            liveRouteLine.setLatLngs(liveRouteCoords);
+          }
+        } else {
+          banner.classList.add('hidden');
+        }
+
+        const m = ov.mileage || {};
+        document.getElementById('live-today-km').textContent = `Today: ${Number(m.today_km || 0).toFixed(1)} km`;
+        document.getElementById('mil-odo').textContent = m.odometer_km ? Number(m.odometer_km).toLocaleString() : '—';
+        document.getElementById('mil-today-km').textContent = Number(m.today_km || 0).toFixed(1);
+        document.getElementById('mil-today-sub').textContent = `${m.today_trips || 0} trips • ${Number(m.today_kwh || 0).toFixed(2)} kWh`;
+        document.getElementById('mil-week-km').textContent = Number(m.week_km || 0).toFixed(1);
+        document.getElementById('mil-week-sub').textContent = `${m.week_trips || 0} trips • ${Number(m.week_kwh || 0).toFixed(2)} kWh`;
+        document.getElementById('mil-month-km').textContent = Number(m.month_km || 0).toFixed(1);
+        document.getElementById('mil-month-sub').textContent = `${m.month_trips || 0} trips • ${Number(m.month_kwh || 0).toFixed(2)} kWh`;
+        document.getElementById('mil-wh-km').textContent = m.avg_wh_per_km || '—';
+        document.getElementById('mil-km-kwh').textContent = `Efficiency: ${m.avg_km_per_kwh || '—'} km/kWh`;
+        document.getElementById('mil-total-kwh').textContent = Number(m.lifetime_kwh || 0).toFixed(2);
+        document.getElementById('mil-regen-sub').textContent = `Regen recovered: +${Number(m.lifetime_regen_kwh || 0).toFixed(2)} kWh`;
+
+        updateMileageCharts(ov.daily_series || []);
+
+        const chBody = document.getElementById('charges-table-body');
+        if (ov.recent_charges && ov.recent_charges.length > 0) {
+          chBody.innerHTML = ov.recent_charges.map(c => `
+            <tr>
+              <td class="py-2.5 px-2.5 sm:px-3 text-slate-300 whitespace-nowrap">${formatNptDate(c.ended_at_ms)}</td>
+              <td class="py-2.5 px-2.5 sm:px-3 text-emerald-400 font-semibold whitespace-nowrap">${c.soc_start_pct ?? '—'}% → ${c.soc_end_pct ?? '—'}%</td>
+              <td class="py-2.5 px-2.5 sm:px-3 text-white font-medium whitespace-nowrap">+${Number(c.kwh_added || 0).toFixed(2)} kWh</td>
+              <td class="py-2.5 px-2.5 sm:px-3 text-sky-300 whitespace-nowrap">${Number(c.avg_kw || 0).toFixed(1)} / ${Number(c.peak_kw || 0).toFixed(1)} kW</td>
+              <td class="py-2.5 px-2.5 sm:px-3 text-slate-400 whitespace-nowrap">${formatDuration(c.duration_s)}</td>
+            </tr>
+          `).join('');
+        }
+      } catch (err) {
+        console.error('Overview fetch failed:', err);
+      }
+    }
+
+    function showNotificationToast(notif) {
+      if (!notif) return;
+      const banner = document.getElementById('toast-banner');
+      document.getElementById('toast-title').textContent = notif.title || 'BYD Atto 3 Alert';
+      document.getElementById('toast-body').textContent = notif.body || '';
+      banner.classList.remove('hidden');
+      document.getElementById('notif-dot').classList.remove('hidden');
+
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(notif.title || 'BYD Atto 3', { body: notif.body || '' });
+        } catch (e) {}
+      }
+      setTimeout(() => banner.classList.add('hidden'), 9000);
+    }
+
+    async function loadNotifications() {
+      try {
+        const res = await fetch('/api/notifications');
+        const data = await res.json();
+        const s = data.settings || {};
+        document.getElementById('cfg-ntfy-enabled').checked = Boolean(s.ntfy_enabled ?? 1);
+        document.getElementById('cfg-ntfy-topic').value = s.ntfy_topic || 'byd-telemetry-alerts';
+        document.getElementById('ntfy-subscribe-link').href = `ntfy://ntfy.sh/${s.ntfy_topic || 'byd-telemetry-alerts'}`;
+        document.getElementById('cfg-tg-enabled').checked = Boolean(s.telegram_enabled ?? 0);
+        document.getElementById('cfg-tg-token').value = s.telegram_bot_token || '';
+        document.getElementById('cfg-tg-chat').value = s.telegram_chat_id || '';
+        document.getElementById('cfg-trip-start').checked = Boolean(s.notify_trip_start ?? 1);
+        document.getElementById('cfg-trip-end').checked = Boolean(s.notify_trip_end ?? 1);
+
+        const list = document.getElementById('notif-history-list');
+        const items = data.notifications || [];
+        if (items.length === 0) {
+          list.innerHTML = `<div class="text-slate-500 text-center py-2">No notifications triggered yet.</div>`;
+        } else {
+          list.innerHTML = items.map(n => `
+            <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+              <div class="flex items-center justify-between">
+                <span class="font-bold text-sky-300">${escapeHtml(n.title)}</span>
+                <span class="text-[10px] text-slate-400">${formatNptDate(n.created_at_ms)}</span>
+              </div>
+              <div class="text-[11px] text-slate-300 mt-0.5">${escapeHtml(n.body)}</div>
+            </div>
+          `).join('');
+        }
+      } catch (e) {}
+    }
+
+    function openNotifModal() {
+      document.getElementById('notif-dot').classList.add('hidden');
+      document.getElementById('notif-modal').classList.remove('hidden');
+      loadNotifications();
+    }
+
+    function closeNotifModal() {
+      document.getElementById('notif-modal').classList.add('hidden');
+    }
+
+    function enableBrowserNotifications() {
+      if (!('Notification' in window)) {
+        alert('Browser notifications require HTTPS or adding this page to your Home Screen.');
+        return;
+      }
+      Notification.requestPermission().then(perm => {
+        document.getElementById('browser-perm-status').textContent = `Browser permission: ${perm}`;
+      });
+    }
+
+    async function saveNotifSettings() {
+      const topic = document.getElementById('cfg-ntfy-topic').value.trim() || 'byd-telemetry-alerts';
+      document.getElementById('ntfy-subscribe-link').href = `ntfy://ntfy.sh/${topic}`;
+      await fetch('/api/notifications/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ntfy_enabled: document.getElementById('cfg-ntfy-enabled').checked,
+          ntfy_topic: topic,
+          telegram_enabled: document.getElementById('cfg-tg-enabled').checked,
+          telegram_bot_token: document.getElementById('cfg-tg-token').value.trim(),
+          telegram_chat_id: document.getElementById('cfg-tg-chat').value.trim(),
+          notify_trip_start: document.getElementById('cfg-trip-start').checked,
+          notify_trip_end: document.getElementById('cfg-trip-end').checked,
+        })
+      });
+      const msg = document.getElementById('notif-save-msg');
+      msg.textContent = '✓ Notification settings saved!';
+      msg.classList.remove('hidden');
+      setTimeout(() => msg.classList.add('hidden'), 3000);
+    }
+
+    async function sendTestNotif() {
+      await saveNotifSettings();
+      const btn = document.getElementById('test-notif-btn');
+      btn.textContent = 'Sending...';
+      try {
+        const res = await fetch('/api/notifications/test', { method: 'POST' });
+        const data = await res.json();
+        if (data.notification) {
+          showNotificationToast(data.notification);
+          await loadNotifications();
+        }
+      } finally {
+        btn.textContent = '🚗 Test "Trip Started"';
+      }
+    }
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function connectWebSocket() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${location.host}/ws`);
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'telemetry' && msg.state) {
+            if (msg.trip_id !== undefined) activeTripId = msg.trip_id || null;
+            updateStateUI(msg.state);
+            // Move the live beacon on the trip-detail map if viewing the in-progress trip
+            const s = msg.state;
+            if (detailLiveMarker && currentDetailTrip && msg.trip_id === currentDetailTrip.id &&
+                s.lat && s.lon && Math.abs(s.lat) > 0.01) {
+              detailLiveMarker.setLatLng([s.lat, s.lon]);
+              detailLiveMarker.setPopupContent(
+                `<b>Current Location (Live)</b><br>${formatNptDate(s.timestamp_ms)}<br>Speed: ${Number(s.speed_kmh || 0).toFixed(1)} km/h • SoC: ${s.soc ?? '—'}%`
+              );
+              if (detailLiveTrail) detailLiveTrail.addLatLng([s.lat, s.lon]);
+            }
+            const badge = document.getElementById('conn-badge');
+            if (badge) {
+              badge.textContent = '● MQTT Connected';
+              badge.className = 'px-2 py-0.5 text-[10px] sm:text-xs font-semibold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 whitespace-nowrap';
+            }
+            if (msg.trip_id !== window._lastActiveTripId) {
+              window._lastActiveTripId = msg.trip_id;
+              refreshOverviewAndTrips();
+            }
+          } else if (msg.type === 'notification' && msg.notification) {
+            showNotificationToast(msg.notification);
+            refreshOverviewAndTrips();
+          } else if (msg.type === 'trip_completed') {
+            refreshOverviewAndTrips();
+          }
+        } catch (e) {}
+      };
+      ws.onclose = () => setTimeout(connectWebSocket, 3000);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      try { initMaps(); } catch (e) { console.error('Map init error:', e); }
+      refreshOverviewAndTrips();
+      connectWebSocket();
+      setInterval(refreshOverviewAndTrips, 10000);
+    });
+  </script>
+</body>
+</html>
